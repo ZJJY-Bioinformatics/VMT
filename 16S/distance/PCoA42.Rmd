@@ -1,0 +1,284 @@
+---
+title: ""
+author: "Qiu Wen"
+date: ""
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+    toc: true
+    toc_flaot: true
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=TRUE,
+                 cache=FALSE,
+               prompt=FALSE,
+               tidy=TRUE,
+               message=FALSE,
+               warning=FALSE,
+               collapse = TRUE)
+opts_knit$set(width=75)
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(ggExtra)
+library(patchwork)
+library(ggnewscale)
+```
+
+```{r, echo=FALSE}
+assign("read.pc", function (distance, ...) {
+    ## It will skip all the beginning comment lines except
+    ## the last line.
+    ## This is specifically for QIIME related tables.
+    filename <- distance
+    lines <- readLines(filename)
+    ## lines of comment
+    n <- grep("^#", lines)
+    if(length(n) > 0)
+        start <- n[length(n)]
+    else
+        start <- 1
+    end <- length(lines)
+    x <- read.table(text=lines[start:end],
+                    header=F,
+                    sep='\t',
+                    comment.char='',
+                    check.names=F,
+                    stringsAsFactors = F,
+                    fill=T,
+                    ...)
+    x <-na.omit(x)
+    pc_percent <- format(as.numeric(x[2,1:5])*100,digits = 4)
+    print (pc_percent)
+    x <- x[-c(1:2),]
+    rownames(x) <- x[,1]
+    x <- x[,-1]
+    pc_name <- paste("PC",1:5,sep="")
+    colnames(x) <- pc_name
+    pc <- list(pc_data=x,pc_percent=pc_percent)
+})
+```
+
+```{r}
+group = "Group"
+meta = "../Metadata_infant_stool_microbiome__Day_D42__.txt"
+
+meta = read_tsv(meta)
+dir = "D42_bdiv/"
+lv = c("Con", "VMT", "VD")
+```
+
+## Bray_curtis
+```{r}
+unweighted = read.pc(paste0(dir,"/bray_curtis_pc.txt"))
+coor <- unweighted$pc_data %>% 
+  select(PC1, PC2) %>% 
+  rownames_to_column(var = "#SampleID") %>% 
+  inner_join(select(meta, `#SampleID`, all_of(group)), by = "#SampleID") %>% 
+  mutate(!!enquo(group) := fct_relevel(.data[[group]], lv))
+proportion <- unweighted$pc_percent
+
+centroid = coor %>% group_by(Group) %>% 
+  summarise(across(where(is.numeric), mean)) %>% 
+  rename(PC1_centroid = PC1, PC2_centroid = PC2)
+
+coor = coor %>% inner_join(centroid, by = "Group")
+```
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+coor_summary = coor %>% group_by(Group) %>% 
+  summarise(PC1.se = sd(PC1)/sqrt(n()), 
+            PC2.se = sd(PC2)/sqrt(n()), 
+            PC1_centroid = mean(PC1), 
+            PC2_centroid = mean(PC2), 
+            PC1.sd = sd(PC1), 
+            PC2.sd = sd(PC2))
+
+
+
+```
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+# mean + se
+ggplot() + 
+  geom_errorbar(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, ymin = PC2_centroid - PC2.se, ymax = PC2_centroid + PC2.se, width=.005, color = Group), size = 1, show.legend = F) + 
+  geom_errorbarh(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, xmin = PC1_centroid - PC1.se, xmax = PC1_centroid + PC1.se, height=.005, color = Group), size = 1, show.legend = F) + 
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, color = Group), size = 6.5, shape = 15)+ 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  theme_bw()
+
+```
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+# mean + sd
+ggplot() + 
+  geom_errorbar(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, ymin = PC2_centroid - PC2.sd, ymax = PC2_centroid + PC2.sd, width=.015, color = Group), size = 1, show.legend = F) + 
+  geom_errorbarh(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, xmin = PC1_centroid - PC1.sd, xmax = PC1_centroid + PC1.sd, height=.015, color = Group), size = 1, show.legend = F) + 
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, color = Group), size = 6.5, shape = 15)+ 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  theme_bw()
+
+
+
+```
+
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+
+p1 = ggplot() + 
+  geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_segment(coor, mapping = aes(x = PC1, y = PC2, xend = PC1_centroid, yend = PC2_centroid, color = Group), alpha = 0.6, show.legend = F) + 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T) + 
+  theme_bw() +
+  labs(
+       x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) 
+
+p1
+
+```
+```{r, fig.width=4, fig.height=3, dpi=900}
+
+p1 = ggplot() + 
+  geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_segment(coor, mapping = aes(x = PC1, y = PC2, xend = PC1_centroid, yend = PC2_centroid, color = Group), alpha = 0.6, show.legend = F) + 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T) + 
+  theme_bw() +
+  labs(
+       x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) +
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, fill = Group), size = 3, shape = 21, color = "white")
+
+
+p1
+
+```
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+
+p1 = ggplot() + 
+  geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_segment(coor, mapping = aes(x = PC1, y = PC2, xend = PC1_centroid, yend = PC2_centroid, color = Group), alpha = 0.5, show.legend = F) + 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T) + 
+  theme_bw() +
+  labs(
+       x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) +
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, fill = Group), size = 3, shape = 25, color = "white")
+
+
+p1
+
+```
+
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+
+p1 = ggplot() + 
+  # geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  # geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  stat_ellipse(coor, mapping = aes(PC1, PC2, fill=Group), type = "norm", geom ="polygon", alpha=0.1,show.legend = F, color = NA) + 
+  geom_segment(coor, mapping = aes(x = PC1, y = PC2, xend = PC1_centroid, yend = PC2_centroid, color = Group), alpha = 0.6, show.legend = F) + 
+  scale_color_manual(values = c('#7bc2ce', '#8562cc', '#A8A8A8', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#7bc2ce', '#8562cc', '#A8A8A8', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T, size = 2, stroke = 0.3) + 
+  theme_minimal() +
+  labs(
+       x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) +
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, fill = Group), shape = 22, size = 4, color = "white") + 
+  theme(aspect.ratio = 1, 
+        #panel.border = element_rect(fill = "transparent", color = "black")
+        )
+
+
+p1
+ggsave("fig1f_D42_三组PCoA.pdf", width = 4, height = 3)
+
+```
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+p1 = ggplot() + 
+  geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T, alpha = 0.3) + 
+  theme_bw() +
+  labs(
+       x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) + 
+  geom_errorbar(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, ymin = PC2_centroid - PC2.sd, ymax = PC2_centroid + PC2.sd, width=.025, color = Group), size = 1, show.legend = F) + 
+  geom_errorbarh(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, xmin = PC1_centroid - PC1.sd, xmax = PC1_centroid + PC1.sd, height=.025, color = Group), size = 1, show.legend = F) + 
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, color = Group), size = 6.5, shape = 15)
+
+p1
+
+```
+
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+
+p1 = ggplot() + 
+  geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_segment(coor, mapping = aes(x = PC1, y = PC2, xend = PC1_centroid, yend = PC2_centroid, color = Group), alpha = 0.3, show.legend = F) + 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T, alpha = 0.3) + 
+  theme_bw() +
+  labs(x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) + 
+  geom_errorbar(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, ymin = PC2_centroid - PC2.sd, ymax = PC2_centroid + PC2.sd, width=.025, color = Group), size = 1, show.legend = F) + 
+  geom_errorbarh(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, xmin = PC1_centroid - PC1.sd, xmax = PC1_centroid + PC1.sd, height=.025, color = Group), size = 1, show.legend = F) + 
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, color = Group), size = 6.5, shape = 15)
+
+p1
+
+```
+
+
+
+
+```{r, fig.width=4, fig.height=3, dpi=900}
+
+p1 = ggplot() + 
+  geom_hline(coor, mapping = aes(PC1, PC2), yintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  geom_vline(coor, mapping = aes(PC1, PC2), xintercept = 0,lty="dashed",colour="grey60",size=0.4)+
+  stat_ellipse(coor, mapping = aes(PC1, PC2, fill=Group), type = "norm", geom ="polygon", alpha=0.1,show.legend = F, color = NA) + 
+  scale_color_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  scale_fill_manual(values = c('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467BC')) + 
+  geom_point(coor, mapping = aes(PC1, PC2, fill = Group), color = "white", shape = 21, show.legend = T, alpha = 0.3) + 
+  theme_bw() +
+  labs(
+       x = paste0("PC1 (", proportion[1], "%)"),
+       y = paste0("PC2 (", proportion[2], "%)")) + 
+  geom_errorbar(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, ymin = PC2_centroid - PC2.sd, ymax = PC2_centroid + PC2.sd, width=.025, color = Group), size = 1, show.legend = F) + 
+  geom_errorbarh(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, xmin = PC1_centroid - PC1.sd, xmax = PC1_centroid + PC1.sd, height=.025, color = Group), size = 1, show.legend = F) + 
+  geom_point(data = coor_summary, mapping = aes(PC1_centroid, PC2_centroid, color = Group), size = 6.5, shape = 15)
+
+p1
+
+```
+
