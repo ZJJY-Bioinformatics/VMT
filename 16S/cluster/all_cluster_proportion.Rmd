@@ -1,0 +1,154 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+    toc: true
+    toc_flaot: true
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=TRUE,
+                 cache=FALSE,
+               prompt=FALSE,
+               tidy=TRUE,
+               message=FALSE,
+               warning=FALSE,
+               collapse = TRUE, dev='cairo_pdf', out.width="500px", out.height="500px")
+opts_knit$set(width=75)
+```
+
+```{r}
+library(tidyverse)
+library(ggsci)
+library(ggstatsplot)
+library(ggpubr)
+library(ggsci)
+```
+
+```{r}
+ET = read_delim("2_cluster.sample.txt", delim = "\t")
+
+genus = read.table("../../../../../infant_stool_e10k_L6.txt", skip = 1, comment.char = "", sep = "\t", header = T, check.names = F) %>% 
+  sjmisc::rotate_df(cn = T) %>% 
+  rownames_to_column(var = "#SampleID") 
+
+
+ET$`#SampleID` = genus$`#SampleID`
+
+meta = read_tsv("../../../../../../../../Metadata_infant_stool_microbiome.txt")
+
+new_meta = ET %>% select(`#SampleID`, ET) %>% 
+  inner_join(meta, by = "#SampleID") %>% 
+  mutate(Day = fct_relevel(Day, c("D3", "D7", "D30", "D42")), 
+         Group = fct_relevel(Group, c("Con", "VMT", "VD")))
+
+# 各肠型样本数
+table(new_meta$ET)
+
+```
+
+
+```{r, fig.width=4, fig.height=5, dpi=600}
+
+
+ggbarstats(data = new_meta, x = Group, y = ET) + 
+  scale_fill_manual(values = rev(c('#1f77b4', '#ff7f0e', '#2ca02c')))
+```
+
+```{r, fig.width=4, fig.height=5, dpi=600}
+ggbarstats(data = new_meta, x = Day, y = ET, palette = "Paired") 
+```
+
+```{r, fig.width=5, fig.height=5}
+ggbarstats(data = new_meta, x = ET, y = Group, palette = "Paired") 
+```
+
+```{r, fig.width=5, fig.height=5}
+library(gginnards)
+b1 = ggbarstats(data = new_meta, x = ET, y = Group, palette = "Paired") 
+delete_layers(b1, "GeomLabel")
+```
+
+
+```{r, fig.width=6, fig.height=5}
+ggbarstats(data = new_meta, x = ET, y = Day, palette = "Paired", width = 0.1) 
+```
+```{r, fig.width=5, fig.height=5}
+
+bar = ggbarstats(data = new_meta, x = ET, y = Day, palette = "Paired", width = 0.1, bf.message = F) 
+delete_layers(bar, "GeomLabel")
+```
+
+
+各型的物种组成
+
+```{r}
+source("/data/scripts/utility.R")
+all_genus = read.table("../../../../../infant_stool_e10k_L6.txt", skip = 1, comment.char = "", sep = "\t", header = T, check.names = F) %>% 
+  sjmisc::rotate_df(cn = T) %>% 
+  rownames_to_column(var = "#SampleID") 
+
+meta = read_tsv("ET_meta.tsv") %>% 
+  select(`#SampleID`, Group, ET) %>% 
+  filter(Group != "VD") 
+all_genus = all_genus %>% filter(`#SampleID` %in% meta$`#SampleID`) %>% 
+  column_to_rownames(var = "#SampleID")
+
+#colnames(all_genus) = taxa_shortname(colnames(all_genus))
+
+# 各物种丰度排序
+
+need <- readRDS("总丰度大于90%的13个菌.RDS")
+
+genus_RA <- all_genus %>% rownames_to_column(var="#SampleID") %>% inner_join(meta,.,by="#SampleID") %>% 
+    group_by(ET) %>% 
+    dplyr::summarise(across(where(is.numeric), mean)) %>% 
+    select(ET, all_of(need))
+
+Others <- 1-rowSums(genus_RA[,-1])
+colnames(genus_RA) = c("ET", taxa_shortname(colnames(genus_RA)[-1]))
+
+barplot_dat <- cbind(genus_RA, Others) %>% 
+    pivot_longer(-ET, names_to = "taxa", values_to = "abundance") %>% 
+  mutate(ET = factor(ET))
+barplot_dat$taxa <- factor(barplot_dat$taxa, levels = rev(c(colnames(genus_RA)[-1], "Others")))
+
+
+
+```
+```{r, dpi=900, fig.width=6, fig.height=5}
+colors = c("#80B1D3","#B3DE69","#FFFFB3","#8DD3C7","#4daf4a",
+               "#377eb8","#BEBADA","#FB8072","#FDB462","#FCCDE5",
+               "#BC80BD","#CCEBC5","#FFED6F","#CD4F39","#BC41A4",
+               "#4F94CD","#E41A1C","#00CD66","#CD3278","#CD8A96",
+               "#00C5CD","#CDCD00","#CD85CD","#CD853F","#8B5A2B",
+               "#5CACEE","#EE5C42","#00EE76","#EE4A8C","#EED8AE",
+               "#00E5EE","#EEEE00","#EED2EE","#EE9A49","#E41A1C",
+               "#377EB8","#FF6A6A","#87CEFA","#6E8B3D","#FFEBCD","#B2DFEE")
+color = c("#D9D9D9",rev(colors[1:13]))
+
+ggplot(barplot_dat, aes(ET, abundance, fill=taxa)) +
+    geom_bar(stat = "identity", width = 0.6) + 
+    scale_fill_manual(values = color) + 
+    theme_minimal() + 
+    theme(legend.title=element_blank(),
+        axis.text=element_text(color="black"),
+        panel.border=element_rect(fill="transparent",color="grey"), 
+        aspect.ratio = 1.2,
+        legend.text = element_text(face = "italic")) + 
+  scale_y_continuous(breaks = seq(0,1, 0.2)) + 
+    labs(y="Relative abundance", x="ET")
+ggsave("fig1h-两种型别的样本物种组成图.pdf", width = 5, height = 5)
+```
